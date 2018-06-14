@@ -44,6 +44,8 @@ type Node struct {
 	UDP, TCP uint16 // port numbers
 	ID       NodeID // the node's public key
 
+	RaftPort uint16
+
 	// This is a cached copy of sha3(ID) which is used for node
 	// distance calculations. This is part of Node in order to make it
 	// possible to write tests that need a node at a certain distance.
@@ -111,8 +113,21 @@ func (n *Node) String() string {
 		if n.UDP != n.TCP {
 			u.RawQuery = "discport=" + strconv.Itoa(int(n.UDP))
 		}
+
+		if n.HasRaftPort() {
+			raftQuery := "raftport=" + strconv.Itoa(int(n.RaftPort))
+			if len(u.RawQuery) > 0 {
+				u.RawQuery = u.RawQuery + "&" + raftQuery
+			} else {
+				u.RawQuery = raftQuery
+			}
+		}
 	}
 	return u.String()
+}
+
+func (n *Node) HasRaftPort() bool {
+	return n.RaftPort > 0
 }
 
 var incompleteNodeURL = regexp.MustCompile("(?i)^(?:enode://)?([0-9a-f]+)$")
@@ -195,7 +210,17 @@ func parseComplete(rawurl string) (*Node, error) {
 			return nil, errors.New("invalid discport in query")
 		}
 	}
-	return NewNode(id, ip, uint16(udpPort), uint16(tcpPort)), nil
+
+	node := NewNode(id, ip, uint16(udpPort), uint16(tcpPort))
+
+	if qv.Get("raftport") != "" {
+		raftPort, err := strconv.ParseUint(qv.Get("raftport"), 10, 16)
+		if err != nil {
+			return nil, errors.New("invalid raftport in query")
+		}
+		node.RaftPort = uint16(raftPort)
+	}
+	return node, nil
 }
 
 // MustParseNode parses a node URL. It panics if the URL is not valid.
@@ -225,6 +250,11 @@ func (n *Node) UnmarshalText(text []byte) error {
 // The node identifier is a marshaled elliptic curve public key.
 type NodeID [NodeIDBits / 8]byte
 
+// Bytes returns a byte slice representation of the NodeID
+func (n NodeID) Bytes() []byte {
+	return n[:]
+}
+
 // NodeID prints as a long hexadecimal number.
 func (n NodeID) String() string {
 	return fmt.Sprintf("%x", n[:])
@@ -238,6 +268,41 @@ func (n NodeID) GoString() string {
 // TerminalString returns a shortened hex string for terminal logging.
 func (n NodeID) TerminalString() string {
 	return hex.EncodeToString(n[:8])
+}
+
+// MarshalText implements the encoding.TextMarshaler interface.
+func (n NodeID) MarshalText() ([]byte, error) {
+	return []byte(hex.EncodeToString(n[:])), nil
+}
+
+// UnmarshalText implements the encoding.TextUnmarshaler interface.
+func (n *NodeID) UnmarshalText(text []byte) error {
+	id, err := HexID(string(text))
+	if err != nil {
+		return err
+	}
+	*n = id
+	return nil
+}
+
+// BytesID converts a byte slice to a NodeID
+func BytesID(b []byte) (NodeID, error) {
+	var id NodeID
+	if len(b) != len(id) {
+		return id, fmt.Errorf("wrong length, want %d bytes", len(id))
+	}
+	copy(id[:], b)
+	return id, nil
+}
+
+// MustBytesID converts a byte slice to a NodeID.
+// It panics if the byte slice is not a valid NodeID.
+func MustBytesID(b []byte) NodeID {
+	id, err := BytesID(b)
+	if err != nil {
+		panic(err)
+	}
+	return id
 }
 
 // HexID converts a hex string to a NodeID.

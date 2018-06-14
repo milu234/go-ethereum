@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
@@ -51,12 +52,12 @@ func TestProtocolCompatibility(t *testing.T) {
 		{61, downloader.FastSync, false}, {62, downloader.FastSync, false}, {63, downloader.FastSync, true},
 	}
 	// Make sure anything we screw up is restored
-	backup := ProtocolVersions
-	defer func() { ProtocolVersions = backup }()
+	backup := consensus.EthProtocol.Versions
+	defer func() { consensus.EthProtocol.Versions = backup }()
 
 	// Try all available compatibility configs and check for errors
 	for i, tt := range tests {
-		ProtocolVersions = []uint{tt.version}
+		consensus.EthProtocol.Versions = []uint{tt.version}
 
 		pm, err := newTestProtocolManager(tt.mode, 0, nil, nil)
 		if pm != nil {
@@ -377,7 +378,7 @@ func testGetNodeData(t *testing.T, protocol int) {
 		trie, _ := state.New(pm.blockchain.GetBlockByNumber(i).Root(), state.NewDatabase(statedb))
 
 		for j, acc := range accounts {
-			state, _ := pm.blockchain.State()
+			state, _, _ := pm.blockchain.State()
 			bw := state.GetBalance(acc)
 			bh := trie.GetBalance(acc)
 
@@ -474,17 +475,17 @@ func testDAOChallenge(t *testing.T, localForked, remoteForked bool, timeout bool
 		config        = &params.ChainConfig{DAOForkBlock: big.NewInt(1), DAOForkSupport: localForked}
 		gspec         = &core.Genesis{Config: config}
 		genesis       = gspec.MustCommit(db)
-		blockchain, _ = core.NewBlockChain(db, config, pow, evmux, vm.Config{})
+		blockchain, _ = core.NewBlockChain(db, config, pow, vm.Config{})
 	)
-	pm, err := NewProtocolManager(config, downloader.FullSync, DefaultConfig.NetworkId, 1000, evmux, new(testTxPool), pow, blockchain, db)
+	pm, err := NewProtocolManager(config, downloader.FullSync, DefaultConfig.NetworkId, evmux, new(testTxPool), pow, blockchain, db, false)
 	if err != nil {
 		t.Fatalf("failed to start test protocol manager: %v", err)
 	}
-	pm.Start()
+	pm.Start(1000)
 	defer pm.Stop()
 
 	// Connect a new peer and check that we receive the DAO challenge
-	peer, _ := newTestPeer("peer", eth63, pm, true)
+	peer, _ := newTestPeer("peer", consensus.Eth63, pm, true)
 	defer peer.close()
 
 	challenge := &getBlockHeadersData{

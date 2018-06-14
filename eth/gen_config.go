@@ -7,6 +7,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/consensus/istanbul"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/eth/downloader"
 	"github.com/ethereum/go-ethereum/eth/gasprice"
@@ -36,6 +37,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		TxPool                  core.TxPoolConfig
 		GPO                     gasprice.Config
 		EnablePreimageRecording bool
+		Istanbul                istanbul.Config
 		DocRoot                 string `toml:"-"`
 		PowFake                 bool   `toml:"-"`
 		PowTest                 bool   `toml:"-"`
@@ -47,7 +49,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.SyncMode = c.SyncMode
 	enc.LightServ = c.LightServ
 	enc.LightPeers = c.LightPeers
-	enc.MaxPeers = c.MaxPeers
 	enc.SkipBcVersionCheck = c.SkipBcVersionCheck
 	enc.DatabaseHandles = c.DatabaseHandles
 	enc.DatabaseCache = c.DatabaseCache
@@ -64,6 +65,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.TxPool = c.TxPool
 	enc.GPO = c.GPO
 	enc.EnablePreimageRecording = c.EnablePreimageRecording
+	enc.Istanbul = c.Istanbul
 	enc.DocRoot = c.DocRoot
 	enc.PowFake = c.PowFake
 	enc.PowTest = c.PowTest
@@ -95,6 +97,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		TxPool                  *core.TxPoolConfig
 		GPO                     *gasprice.Config
 		EnablePreimageRecording *bool
+		Istanbul                *istanbul.Config
 		DocRoot                 *string `toml:"-"`
 		PowFake                 *bool   `toml:"-"`
 		PowTest                 *bool   `toml:"-"`
@@ -118,9 +121,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.LightPeers != nil {
 		c.LightPeers = *dec.LightPeers
-	}
-	if dec.MaxPeers != nil {
-		c.MaxPeers = *dec.MaxPeers
 	}
 	if dec.SkipBcVersionCheck != nil {
 		c.SkipBcVersionCheck = *dec.SkipBcVersionCheck
@@ -169,6 +169,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.EnablePreimageRecording != nil {
 		c.EnablePreimageRecording = *dec.EnablePreimageRecording
+	}
+	if dec.Istanbul != nil {
+		c.Istanbul = *dec.Istanbul
 	}
 	if dec.DocRoot != nil {
 		c.DocRoot = *dec.DocRoot

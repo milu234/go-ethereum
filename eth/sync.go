@@ -138,7 +138,9 @@ func (pm *ProtocolManager) syncer() {
 	defer pm.downloader.Terminate()
 
 	// Wait for different events to fire synchronisation operations
-	forceSync := time.Tick(forceSyncCycle)
+	forceSync := time.NewTicker(forceSyncCycle)
+	defer forceSync.Stop()
+
 	for {
 		select {
 		case <-pm.newPeerCh:
@@ -146,11 +148,15 @@ func (pm *ProtocolManager) syncer() {
 			if pm.peers.Len() < minDesiredPeerCount {
 				break
 			}
-			go pm.synchronise(pm.peers.BestPeer())
+			if !pm.raftMode {
+				go pm.synchronise(pm.peers.BestPeer())
+			}
 
-		case <-forceSync:
-			// Force a sync even if not enough peers are present
-			go pm.synchronise(pm.peers.BestPeer())
+		case <-forceSync.C:
+			if !pm.raftMode {
+				// Force a sync even if not enough peers are present
+				go pm.synchronise(pm.peers.BestPeer())
+			}
 
 		case <-pm.noMorePeers:
 			return
@@ -186,7 +192,17 @@ func (pm *ProtocolManager) synchronise(peer *peer) {
 		atomic.StoreUint32(&pm.fastSync, 1)
 		mode = downloader.FastSync
 	}
-	if err := pm.downloader.Synchronise(peer.id, pHead, pTd, mode); err != nil {
+	// Run the sync cycle, and disable fast sync if we've went past the pivot block
+	err := pm.downloader.Synchronise(peer.id, pHead, pTd, mode)
+
+	if atomic.LoadUint32(&pm.fastSync) == 1 {
+		// Disable fast sync if we indeed have something in our chain
+		if pm.blockchain.CurrentBlock().NumberU64() > 0 {
+			log.Info("Fast sync complete, auto disabling")
+			atomic.StoreUint32(&pm.fastSync, 0)
+		}
+	}
+	if err != nil {
 		return
 	}
 	atomic.StoreUint32(&pm.acceptTxs, 1) // Mark initial sync done
@@ -198,13 +214,5 @@ func (pm *ProtocolManager) synchronise(peer *peer) {
 		// degenerate connectivity, but it should be healthy for the mainnet too to
 		// more reliably update peers or the local TD state.
 		go pm.BroadcastBlock(head, false)
-	}
-	// If fast sync was enabled, and we synced up, disable it
-	if atomic.LoadUint32(&pm.fastSync) == 1 {
-		// Disable fast sync if we indeed have something in our chain
-		if pm.blockchain.CurrentBlock().NumberU64() > 0 {
-			log.Info("Fast sync complete, auto disabling")
-			atomic.StoreUint32(&pm.fastSync, 0)
-		}
 	}
 }

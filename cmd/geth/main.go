@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -67,6 +68,8 @@ var (
 		utils.EthashDatasetsInMemoryFlag,
 		utils.EthashDatasetsOnDiskFlag,
 		utils.TxPoolNoLocalsFlag,
+		utils.TxPoolJournalFlag,
+		utils.TxPoolRejournalFlag,
 		utils.TxPoolPriceLimitFlag,
 		utils.TxPoolPriceBumpFlag,
 		utils.TxPoolAccountSlotsFlag,
@@ -99,6 +102,7 @@ var (
 		utils.DevModeFlag,
 		utils.TestnetFlag,
 		utils.RinkebyFlag,
+		utils.OttomanFlag,
 		utils.VMEnableDebugFlag,
 		utils.NetworkIdFlag,
 		utils.RPCCORSDomainFlag,
@@ -110,6 +114,14 @@ var (
 		utils.GpoPercentileFlag,
 		utils.ExtraDataFlag,
 		configFileFlag,
+		utils.EnableNodePermissionFlag,
+		utils.RaftModeFlag,
+		utils.RaftBlockTimeFlag,
+		utils.RaftJoinExistingFlag,
+		utils.RaftPortFlag,
+		utils.EmitCheckpointsFlag,
+		utils.IstanbulRequestTimeoutFlag,
+		utils.IstanbulBlockPeriodFlag,
 	}
 
 	rpcFlags = []cli.Flag{
@@ -143,6 +155,7 @@ func init() {
 		initCommand,
 		importCommand,
 		exportCommand,
+		copydbCommand,
 		removedbCommand,
 		dumpCommand,
 		// See monitorcmd.go:
@@ -155,6 +168,7 @@ func init() {
 		attachCommand,
 		javascriptCommand,
 		// See misccmd.go:
+		makecacheCommand,
 		makedagCommand,
 		versionCommand,
 		bugCommand,
@@ -162,6 +176,7 @@ func init() {
 		// See config.go
 		dumpConfigCommand,
 	}
+	sort.Sort(cli.CommandsByName(app.Commands))
 
 	app.Flags = append(app.Flags, nodeFlags...)
 	app.Flags = append(app.Flags, rpcFlags...)
@@ -209,6 +224,8 @@ func geth(ctx *cli.Context) error {
 // it unlocks any requested accounts, and starts the RPC/IPC interfaces and the
 // miner.
 func startNode(ctx *cli.Context, stack *node.Node) {
+	log.DoEmitCheckpoints = ctx.GlobalBool(utils.EmitCheckpointsFlag.Name)
+
 	// Start up the node itself
 	utils.StartNode(stack)
 
@@ -234,24 +251,30 @@ func startNode(ctx *cli.Context, stack *node.Node) {
 		}
 		stateReader := ethclient.NewClient(rpcClient)
 
-		// Open and self derive any wallets already attached
+		// Open any wallets already attached
 		for _, wallet := range stack.AccountManager().Wallets() {
 			if err := wallet.Open(""); err != nil {
 				log.Warn("Failed to open wallet", "url", wallet.URL(), "err", err)
-			} else {
-				wallet.SelfDerive(accounts.DefaultBaseDerivationPath, stateReader)
 			}
 		}
 		// Listen for wallet event till termination
 		for event := range events {
-			if event.Arrive {
+			switch event.Kind {
+			case accounts.WalletArrived:
 				if err := event.Wallet.Open(""); err != nil {
 					log.Warn("New wallet appeared, failed to open", "url", event.Wallet.URL(), "err", err)
+				}
+			case accounts.WalletOpened:
+				status, _ := event.Wallet.Status()
+				log.Info("New wallet appeared", "url", event.Wallet.URL(), "status", status)
+
+				if event.Wallet.URL().Scheme == "ledger" {
+					event.Wallet.SelfDerive(accounts.DefaultLedgerBaseDerivationPath, stateReader)
 				} else {
-					log.Info("New wallet appeared", "url", event.Wallet.URL(), "status", event.Wallet.Status())
 					event.Wallet.SelfDerive(accounts.DefaultBaseDerivationPath, stateReader)
 				}
-			} else {
+
+			case accounts.WalletDropped:
 				log.Info("Old wallet dropped", "url", event.Wallet.URL())
 				event.Wallet.Close()
 			}

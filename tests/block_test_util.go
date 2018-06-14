@@ -33,7 +33,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/ethdb"
-	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
 )
@@ -53,6 +52,7 @@ type btJSON struct {
 	Pre       core.GenesisAlloc     `json:"pre"`
 	Post      core.GenesisAlloc     `json:"postState"`
 	BestBlock common.UnprefixedHash `json:"lastblockhash"`
+	Network   string                `json:"network"`
 }
 
 type btBlock struct {
@@ -91,7 +91,12 @@ type btHeaderMarshaling struct {
 	Timestamp  *math.HexOrDecimal256
 }
 
-func (t *BlockTest) Run(config *params.ChainConfig) error {
+func (t *BlockTest) Run() error {
+	config, ok := Forks[t.json.Network]
+	if !ok {
+		return UnsupportedForkError{t.json.Network}
+	}
+
 	// import pre accounts & construct test genesis block & state root
 	db, _ := ethdb.NewMemDatabase()
 	gblock, err := t.genesis(config).Commit(db)
@@ -105,7 +110,7 @@ func (t *BlockTest) Run(config *params.ChainConfig) error {
 		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", gblock.Root().Bytes()[:6], t.json.Genesis.StateRoot[:6])
 	}
 
-	chain, err := core.NewBlockChain(db, config, ethash.NewShared(), new(event.TypeMux), vm.Config{})
+	chain, err := core.NewBlockChain(db, config, ethash.NewShared(), vm.Config{})
 	if err != nil {
 		return err
 	}
@@ -119,7 +124,8 @@ func (t *BlockTest) Run(config *params.ChainConfig) error {
 	if common.Hash(t.json.BestBlock) != cmlast {
 		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", t.json.BestBlock, cmlast)
 	}
-	newDB, err := chain.State()
+
+	newDB, _, err := chain.State()
 	if err != nil {
 		return err
 	}

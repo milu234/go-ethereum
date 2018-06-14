@@ -25,6 +25,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/consensus/istanbul"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/eth/downloader"
 	"github.com/ethereum/go-ethereum/eth/gasprice"
@@ -49,6 +50,8 @@ var DefaultConfig = Config{
 		Blocks:     10,
 		Percentile: 50,
 	},
+
+	Istanbul: *istanbul.DefaultConfig,
 }
 
 func init() {
@@ -79,7 +82,6 @@ type Config struct {
 	// Light client options
 	LightServ  int `toml:",omitempty"` // Maximum percentage of time allowed for serving LES requests
 	LightPeers int `toml:",omitempty"` // Maximum number of LES client peers
-	MaxPeers   int `toml:"-"`          // Maximum number of global peers
 
 	// Database options
 	SkipBcVersionCheck bool `toml:"-"`
@@ -108,6 +110,11 @@ type Config struct {
 
 	// Enables tracking of SHA3 preimages in the VM
 	EnablePreimageRecording bool
+
+	RaftMode             bool
+	EnableNodePermission bool
+	// Istanbul options
+	Istanbul istanbul.Config
 
 	// Miscellaneous options
 	DocRoot   string `toml:"-"`

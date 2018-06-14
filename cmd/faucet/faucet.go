@@ -413,8 +413,9 @@ func (f *faucet) apiHandler(conn *websocket.Conn) {
 		// Iterate over all the files and look for Ethereum addresses
 		var address common.Address
 		for _, file := range gist.Files {
-			if len(file.Content) == 2+common.AddressLength*2 {
-				address = common.HexToAddress(file.Content)
+			content := strings.TrimSpace(file.Content)
+			if len(content) == 2+common.AddressLength*2 {
+				address = common.HexToAddress(content)
 			}
 		}
 		if address == (common.Address{}) {
@@ -445,7 +446,7 @@ func (f *faucet) apiHandler(conn *websocket.Conn) {
 			amount = new(big.Int).Div(amount, new(big.Int).Exp(big.NewInt(2), big.NewInt(int64(msg.Tier)), nil))
 
 			tx := types.NewTransaction(f.nonce+uint64(len(f.reqs)), address, amount, big.NewInt(21000), f.price, nil)
-			signed, err := f.keystore.SignTx(f.account, tx, f.config.ChainId)
+			signed, err := f.keystore.SignTx(f.account, tx, f.config.ChainId, false)
 			if err != nil {
 				websocket.JSON.Send(conn, map[string]string{"error": err.Error()})
 				f.lock.Unlock()

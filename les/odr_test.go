@@ -123,11 +123,11 @@ func odrContractCall(ctx context.Context, db ethdb.Database, config *params.Chai
 				msg := callmsg{types.NewMessage(from.Address(), &testContractAddr, 0, new(big.Int), big.NewInt(100000), new(big.Int), data, false)}
 
 				context := core.NewEVMContext(msg, header, bc, nil)
-				vmenv := vm.NewEVM(context, statedb, config, vm.Config{})
+				vmenv := vm.NewEVM(context, statedb, statedb, config, vm.Config{})
 
 				//vmenv := core.NewEnv(statedb, config, bc, msg, header, vm.Config{})
 				gp := new(core.GasPool).AddGas(math.MaxBig256)
-				ret, _, _ := core.ApplyMessage(vmenv, msg, gp)
+				ret, _, _, _ := core.ApplyMessage(vmenv, msg, gp)
 				res = append(res, ret...)
 			}
 		} else {
@@ -136,9 +136,9 @@ func odrContractCall(ctx context.Context, db ethdb.Database, config *params.Chai
 			state.SetBalance(testBankAddress, math.MaxBig256)
 			msg := callmsg{types.NewMessage(testBankAddress, &testContractAddr, 0, new(big.Int), big.NewInt(100000), new(big.Int), data, false)}
 			context := core.NewEVMContext(msg, header, lc, nil)
-			vmenv := vm.NewEVM(context, state, config, vm.Config{})
+			vmenv := vm.NewEVM(context, state, state, config, vm.Config{})
 			gp := new(core.GasPool).AddGas(math.MaxBig256)
-			ret, _, _ := core.ApplyMessage(vmenv, msg, gp)
+			ret, _, _, _ := core.ApplyMessage(vmenv, msg, gp)
 			if state.Error() == nil {
 				res = append(res, ret...)
 			}

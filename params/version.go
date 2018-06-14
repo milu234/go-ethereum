@@ -22,9 +22,13 @@ import (
 
 const (
 	VersionMajor = 1        // Major version component of the current release
-	VersionMinor = 6        // Minor version component of the current release
-	VersionPatch = 7        // Patch version component of the current release
+	VersionMinor = 7        // Minor version component of the current release
+	VersionPatch = 2        // Patch version component of the current release
 	VersionMeta  = "stable" // Version metadata to append to the version string
+
+	QuorumVersionMajor = 2
+	QuorumVersionMinor = 0
+	QuorumVersionPatch = 1
 )
 
 // Version holds the textual version string.
@@ -33,7 +37,13 @@ var Version = func() string {
 	if VersionMeta != "" {
 		v += "-" + VersionMeta
 	}
+
 	return v
+}()
+
+// Version holds the textual version string.
+var QuorumVersion = func() string {
+	return fmt.Sprintf("%d.%d.%d", QuorumVersionMajor, QuorumVersionMinor, QuorumVersionPatch)
 }()
 
 func VersionWithCommit(gitCommit string) string {

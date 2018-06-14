@@ -39,6 +39,7 @@ var (
 
 // deriveSigner makes a *best* guess about which signer to use.
 func deriveSigner(V *big.Int) Signer {
+	// joel: this is one of the two places we used a wrong signer to print txes
 	if V.Sign() != 0 && isProtectedV(V) {
 		return NewEIP155Signer(deriveChainId(V))
 	} else {
@@ -131,7 +132,10 @@ func (tx *Transaction) Protected() bool {
 func isProtectedV(V *big.Int) bool {
 	if V.BitLen() <= 8 {
 		v := V.Uint64()
-		return v != 27 && v != 28
+		// 27 / 28 are pre eip 155 -- ie unprotected.
+		// TODO(joel): this is a hack. Everywhere else we maintain vanilla ethereum
+		// compatibility and we should figure out how to extend that to here
+		return !(v == 27 || v == 28 || v == 37 || v == 38)
 	}
 	// anything not 27 or 28 are considered unprotected
 	return true
@@ -209,12 +213,6 @@ func (tx *Transaction) Hash() common.Hash {
 	return v
 }
 
-// SigHash returns the hash to be signed by the sender.
-// It does not uniquely identify the transaction.
-func (tx *Transaction) SigHash(signer Signer) common.Hash {
-	return signer.Hash(tx)
-}
-
 func (tx *Transaction) Size() common.StorageSize {
 	if size := tx.size.Load(); size != nil {
 		return size.(common.StorageSize)
@@ -239,6 +237,7 @@ func (tx *Transaction) AsMessage(s Signer) (Message, error) {
 		amount:     tx.data.Amount,
 		data:       tx.data.Payload,
 		checkNonce: true,
+		isPrivate:  tx.IsPrivate(),
 	}
 
 	var err error
@@ -249,7 +248,13 @@ func (tx *Transaction) AsMessage(s Signer) (Message, error) {
 // WithSignature returns a new transaction with the given signature.
 // This signature needs to be formatted as described in the yellow paper (v+27).
 func (tx *Transaction) WithSignature(signer Signer, sig []byte) (*Transaction, error) {
-	return signer.WithSignature(tx, sig)
+	r, s, v, err := signer.SignatureValues(tx, sig)
+	if err != nil {
+		return nil, err
+	}
+	cpy := &Transaction{data: tx.data}
+	cpy.data.R, cpy.data.S, cpy.data.V = r, s, v
+	return cpy, nil
 }
 
 // Cost returns amount + gasprice * gaslimit.
@@ -300,7 +305,7 @@ func (tx *Transaction) String() string {
 	Hex:      %x
 `,
 		tx.Hash(),
-		len(tx.data.Recipient) == 0,
+		tx.data.Recipient == nil,
 		from,
 		to,
 		tx.data.AccountNonce,
@@ -381,28 +386,32 @@ func (s *TxByPrice) Pop() interface{} {
 // transactions in a profit-maximising sorted order, while supporting removing
 // entire batches of transactions for non-executable accounts.
 type TransactionsByPriceAndNonce struct {
-	txs   map[common.Address]Transactions // Per account nonce-sorted list of transactions
-	heads TxByPrice                       // Next transaction for each unique account (price heap)
+	txs    map[common.Address]Transactions // Per account nonce-sorted list of transactions
+	heads  TxByPrice                       // Next transaction for each unique account (price heap)
+	signer Signer                          // Signer for the set of transactions
 }
 
 // NewTransactionsByPriceAndNonce creates a transaction set that can retrieve
 // price sorted transactions in a nonce-honouring way.
 //
 // Note, the input map is reowned so the caller should not interact any more with
-// if after providng it to the constructor.
-func NewTransactionsByPriceAndNonce(txs map[common.Address]Transactions) *TransactionsByPriceAndNonce {
+// if after providing it to the constructor.
+func NewTransactionsByPriceAndNonce(signer Signer, txs map[common.Address]Transactions) *TransactionsByPriceAndNonce {
 	// Initialize a price based heap with the head transactions
 	heads := make(TxByPrice, 0, len(txs))
-	for acc, accTxs := range txs {
+	for _, accTxs := range txs {
 		heads = append(heads, accTxs[0])
+		// Ensure the sender address is from the signer
+		acc, _ := Sender(signer, accTxs[0])
 		txs[acc] = accTxs[1:]
 	}
 	heap.Init(&heads)
 
 	// Assemble and return the transaction set
 	return &TransactionsByPriceAndNonce{
-		txs:   txs,
-		heads: heads,
+		txs:    txs,
+		heads:  heads,
+		signer: signer,
 	}
 }
 
@@ -416,9 +425,7 @@ func (t *TransactionsByPriceAndNonce) Peek() *Transaction {
 
 // Shift replaces the current best head with the next one from the same account.
 func (t *TransactionsByPriceAndNonce) Shift() {
-	signer := deriveSigner(t.heads[0].data.V)
-	// derive signer but don't cache.
-	acc, _ := Sender(signer, t.heads[0]) // we only sort valid txs so this cannot fail
+	acc, _ := Sender(t.signer, t.heads[0])
 	if txs, ok := t.txs[acc]; ok && len(txs) > 0 {
 		t.heads[0], t.txs[acc] = txs[0], txs[1:]
 		heap.Fix(&t.heads, 0)
@@ -444,6 +451,7 @@ type Message struct {
 	amount, price, gasLimit *big.Int
 	data                    []byte
 	checkNonce              bool
+	isPrivate               bool
 }
 
 func NewMessage(from common.Address, to *common.Address, nonce uint64, amount, gasLimit, price *big.Int, data []byte, checkNonce bool) Message {
@@ -467,3 +475,22 @@ func (m Message) Gas() *big.Int        { return m.gasLimit }
 func (m Message) Nonce() uint64        { return m.nonce }
 func (m Message) Data() []byte         { return m.data }
 func (m Message) CheckNonce() bool     { return m.checkNonce }
+
+func (m Message) IsPrivate() bool {
+	return m.isPrivate
+}
+
+func (tx *Transaction) IsPrivate() bool {
+	if tx.data.V == nil {
+		return false
+	}
+	return tx.data.V.Uint64() == 37 || tx.data.V.Uint64() == 38
+}
+
+func (tx *Transaction) SetPrivate() {
+	if tx.data.V.Int64() == 28 {
+		tx.data.V.SetUint64(38)
+	} else {
+		tx.data.V.SetUint64(37)
+	}
+}
